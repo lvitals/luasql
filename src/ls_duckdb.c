@@ -343,7 +343,10 @@ static int conn_execute(lua_State *L) {
     const char *statement = luaL_checkstring(L, 2);
     duckdb_result result;
     if (duckdb_query(conn->con, statement, &result) != DuckDBSuccess) {
-        return luasql_failmsg(L, "error executing statement. DuckDB: ", duckdb_result_error(&result));
+        const char *err = duckdb_result_error(&result);
+        int res = luasql_failmsg(L, "error executing statement. DuckDB: ", err);
+        duckdb_destroy_result(&result);
+        return res;
     }
 
     duckdb_result_type rt;
