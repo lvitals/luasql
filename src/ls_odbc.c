@@ -696,11 +696,7 @@ static int conn_close (lua_State *L)
 
 	/* Nullify structure fields. */
 	conn->closed = 1;
-	ret = SQLDisconnect(conn->hdbc);
-	if (error(ret)) {
-		return fail(L, hDBC, conn->hdbc);
-	}
-
+	SQLDisconnect(conn->hdbc);
 	ret = SQLFreeHandle(hDBC, conn->hdbc);
 	if (error(ret)) {
 		return fail(L, hDBC, conn->hdbc);
