@@ -298,6 +298,7 @@ static int conn_gc(lua_State *L) {
             conn->env = LUA_NOREF;
         }
         duckdb_disconnect(&conn->con);
+        duckdb_close(&conn->db);
     }
     return 0;
 }
@@ -327,6 +328,7 @@ static int conn_close(lua_State *L) {
         conn->env = LUA_NOREF;
     }
     duckdb_disconnect(&conn->con);
+    duckdb_close(&conn->db);
     lua_pushboolean(L, 1);
     return 1;
 }
