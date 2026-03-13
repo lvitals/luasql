@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    volumes:
+      - .:/workspace:Z
+    environment:
+      - RUNNING_IN_DOCKER=1
+      - DB_NAME=luasql_test
+      - DB_USER=luasql
+      - DB_PASS=luasql
+      - DB_HOST_POSTGRES=db-postgres
+      - DB_HOST_MYSQL=db-mysql
+      - DB_HOST_FIREBIRD=db-firebird
+      - DB_HOST_ORACLE=db-oracle
+    depends_on:
+      - db-postgres
+      - db-mysql
+      - db-firebird
+      - db-oracle
+
+  db-postgres:
+    image: docker.io/library/postgres:15-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=luasql
+      - POSTGRES_PASSWORD=luasql
+      - POSTGRES_DB=luasql_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U luasql -d luasql_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db-mysql:
+    image: docker.io/library/mariadb:10.11
+    ports:
+      - "3307:3306"
+    environment:
+      - MARIADB_USER=luasql
+      - MARIADB_PASSWORD=luasql
+      - MARIADB_DATABASE=luasql_test
+      - MARIADB_ROOT_PASSWORD=root
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h localhost -u luasql -pluasql"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db-firebird:
+    image: docker.io/jacobalberty/firebird:3.0
+    ports:
+      - "3051:3050"
+    environment:
+      - FIREBIRD_DATABASE=luasql_test.fdb
+      - FIREBIRD_USER=luasql
+      - FIREBIRD_PASSWORD=luasql
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1s bash -c 'cat < /dev/null > /dev/tcp/localhost/3050'"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db-oracle:
+    image: docker.io/gvenzl/oracle-free:latest
+    ports:
+      - "1522:1521"
+    environment:
+      - ORACLE_PASSWORD=luasql
+      - APP_USER=luasql
+      - APP_USER_PASSWORD=luasql
+    healthcheck:
+      test: ["CMD-SHELL", "exit | sqlplus -L system/luasql@localhost/FREEPDB1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20

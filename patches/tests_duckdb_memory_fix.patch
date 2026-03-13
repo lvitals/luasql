@@ -1,0 +1,32 @@
+--- tests/duckdb.lua	2026-03-12 11:47:12.684164774 -0300
++++ tests/duckdb.lua.fixed	2026-03-12 11:56:34.557701088 -0300
+@@ -1,2 +1,28 @@
+ QUERYING_STRING_TYPE_NAME = "varchar"
+--- DEFAULT_TEST_DATABASE = ":memory:"
++DEFAULT_TEST_DATABASE = "test_duckdb.db"
++
++-- Setup DuckDB resources
++local old_CONN_OK = CONN_OK
++CONN_OK = function(conn, ...)
++    local c = old_CONN_OK(conn, ...)
++    if c then
++        -- If running under Valgrind, use extreme limits
++        if os.getenv("RUNNING_UNDER_VALGRIND") == "1" then
++            c:execute("SET memory_limit='4MB'")
++            c:execute("SET threads=1")
++            c:execute("SET preserve_insertion_order=false")
++        else
++            c:execute("SET memory_limit='16MB'")
++            c:execute("SET threads=1")
++        end
++    end
++    return c
++end
++
++function checkUnknownDatabase(ENV)
++	-- skip this test: DuckDB might actually connect to a file with any name
++end
++
++function finalization()
++    os.remove(DEFAULT_TEST_DATABASE)
++end

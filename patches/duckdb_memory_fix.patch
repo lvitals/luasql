@@ -1,0 +1,152 @@
+--- src/ls_duckdb.c	2026-03-12 08:10:33.473177964 -0300
++++ src/ls_duckdb.c.fixed	2026-03-12 08:10:33.471177947 -0300
+@@ -86,7 +86,9 @@
+     if (duckdb_value_is_null(result, col, row)) {
+         lua_pushnil(L);
+     } else {
+-        lua_pushstring(L, duckdb_value_varchar(result, col, row));
++        char *str = duckdb_value_varchar(result, col, row);
++        lua_pushstring(L, str);
++        duckdb_free(str);
+     }
+ }
+ 
+@@ -239,7 +241,7 @@
+ */
+ static int cur_numrows(lua_State *L) {
+     // lua_pushnumber(L, duckdb_row_count(getcursor(L)->result));
+-    lua_pushnumber(L, duckdb_row_count(&getcursor(L)->result));
++    lua_pushnumber(L, (lua_Number)duckdb_row_count(&getcursor(L)->result));
+     return 1;
+ }
+ 
+@@ -265,12 +267,16 @@
+ }
+ 
+ static void sql_commit(conn_data *conn) {
+-    duckdb_query(conn->con, "COMMIT", NULL);
++    duckdb_result res;
++    duckdb_query(conn->con, "COMMIT", &res);
++    duckdb_destroy_result(&res);
+ }
+ 
+ 
+ static void sql_begin(conn_data *conn) {
+-    duckdb_query(conn->con, "BEGIN", NULL);
++    duckdb_result res;
++    duckdb_query(conn->con, "BEGIN", &res);
++    duckdb_destroy_result(&res);
+ }
+ 
+ 
+@@ -292,6 +298,7 @@
+             conn->env = LUA_NOREF;
+         }
+         duckdb_disconnect(&conn->con);
++        duckdb_close(&conn->db);
+     }
+     return 0;
+ }
+@@ -321,6 +328,7 @@
+         conn->env = LUA_NOREF;
+     }
+     duckdb_disconnect(&conn->con);
++    duckdb_close(&conn->db);
+     lua_pushboolean(L, 1);
+     return 1;
+ }
+@@ -335,7 +343,10 @@
+     const char *statement = luaL_checkstring(L, 2);
+     duckdb_result result;
+     if (duckdb_query(conn->con, statement, &result) != DuckDBSuccess) {
+-        return luasql_failmsg(L, "error executing statement. DuckDB: ", duckdb_result_error(&result));
++        const char *err = duckdb_result_error(&result);
++        int res = luasql_failmsg(L, "error executing statement. DuckDB: ", err);
++        duckdb_destroy_result(&result);
++        return res;
+     }
+ 
+     duckdb_result_type rt;
+@@ -345,7 +356,7 @@
+         return create_cursor(L, 1, &result);
+     } else {
+         /* no tuples returned */
+-        lua_pushnumber(L, duckdb_rows_changed(&result));
++        lua_pushnumber(L, (lua_Number)duckdb_rows_changed(&result));
+         duckdb_destroy_result(&result);
+         return 1;
+     }
+@@ -373,7 +384,6 @@
+ */
+ static int conn_rollback(lua_State *L)
+ {
+-  char *errmsg;
+   conn_data *conn = getconnection(L);
+   duckdb_result res;
+   const char *sql = "ROLLBACK";
+@@ -382,12 +392,12 @@
+ 
+   if (duckdb_query(conn->con, sql, &res) != DuckDBSuccess)
+     {
+-      lua_pushnil(L);
+-      lua_pushliteral(L, LUASQL_PREFIX);
+-      lua_pushstring(L, errmsg);
+-      lua_concat(L, 2);
+-      return 2;
++      const char *err = duckdb_result_error(&res);
++      int ret = luasql_failmsg(L, "error rolling back transaction. DuckDB: ", err);
++      duckdb_destroy_result(&res);
++      return ret;
+     }
++  duckdb_destroy_result(&res);
+   lua_pushboolean(L, 1);
+   return 1;
+ }
+@@ -411,7 +421,7 @@
+ /*
+ ** Create a new Connection object and push it on top of the stack.
+ */
+-static int create_connection(lua_State *L, int env, duckdb_connection const con) {
++static int create_connection(lua_State *L, int env, duckdb_database db, duckdb_connection con) {
+     conn_data *conn = (conn_data *)LUASQL_NEWUD(L, sizeof(conn_data));
+     luasql_setmeta(L, LUASQL_CONNECTION_DUCKDB);
+ 
+@@ -419,6 +429,7 @@
+     conn->closed = 0;
+     conn->env = LUA_NOREF;
+     conn->auto_commit = 1;
++    conn->db = db;
+     conn->con = con;
+     lua_pushvalue(L, env);                       /* push env userdata */
+     env_data *e = (env_data *)luaL_checkudata(L, -1, LUASQL_ENVIRONMENT_DUCKDB);
+@@ -434,20 +445,20 @@
+     const char *sourcename = luaL_checkstring(L, 2);
+     duckdb_database db;
+     duckdb_connection con;
+-
+-    char * error = NULL;
++    char *error = NULL;
+ 
+     getenvironment(L);	/* validate environment */
+ 
+-    // Needs to pass in db config in third parameter here
+     if (duckdb_open_ext(sourcename, &db, NULL, &error) != DuckDBSuccess) {
+-        return luasql_failmsg(L, "error connecting to database. DuckDB: ", error);
++        int res = luasql_failmsg(L, "error connecting to database. DuckDB: ", error);
++        duckdb_free(error);
++        return res;
+     }
+     if (duckdb_connect(db, &con) != DuckDBSuccess) {
+         duckdb_close(&db);
+         return luasql_failmsg(L, "error connecting to database. DuckDB: ", "Unspecified driver error");
+     }
+-    return create_connection(L, 1, con);
++    return create_connection(L, 1, db, con);
+ }
+ 
+ /*
+@@ -552,4 +563,3 @@
+     luasql_set_info(L);
+     return 1;
+ }
+-

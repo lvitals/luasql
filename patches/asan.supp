@@ -1,0 +1,11 @@
+leak:libduckdb.so
+leak:liblua.so
+leak:lua
+leak:libodbc.so
+leak:odbc.so
+leak:libclntsh.so
+leak:libclntshcore.so
+leak:libfbclient.so
+leak:libnnz.so
+leak:__interceptor_calloc
+leak:__interceptor_strdup

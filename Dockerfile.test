@@ -1,0 +1,73 @@
+FROM debian:bookworm-slim
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    tcl \
+    lua5.4 liblua5.4-dev \
+    luarocks \
+    libsqlite3-dev \
+    libpq-dev \
+    libmariadb-dev \
+    libmariadb-dev-compat \
+    unixodbc-dev \
+    unixodbc \
+    odbc-postgresql \
+    firebird-dev \
+    valgrind \
+    patch \
+    procps \
+    curl \
+    git \
+    unzip \
+    wget \
+    libaio1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Force lua command to point to 5.4
+RUN ln -sf /usr/bin/lua5.4 /usr/bin/lua
+
+# Configure LuaRocks for 5.4
+RUN luarocks config lua_version 5.4 && \
+    luarocks config lua_interpreter /usr/bin/lua5.4 && \
+    luarocks config variables.LUA_INCDIR /usr/include/lua5.4 && \
+    luarocks config variables.LUA_LIBDIR /usr/lib/x86_64-linux-gnu
+
+# Install DuckDB C API
+RUN wget https://github.com/duckdb/duckdb/releases/download/v1.1.3/libduckdb-linux-amd64.zip && \
+    unzip libduckdb-linux-amd64.zip -d /usr/local/lib && \
+    mkdir -p /usr/local/include && \
+    mv /usr/local/lib/duckdb.h /usr/local/include/ && \
+    mv /usr/local/lib/duckdb.hpp /usr/local/include/ && \
+    rm libduckdb-linux-amd64.zip && \
+    ldconfig
+
+# Install SQLite 2 from source
+RUN apt-get update && apt-get install -y libtool tcl-dev && \
+    wget https://www.sqlite.org/sqlite-2.8.17.tar.gz -O sqlite-2.8.17.tar.gz && \
+    tar xzf sqlite-2.8.17.tar.gz && \
+    cd sqlite-2.8.17 && \
+    ./configure --prefix=/usr/local && \
+    make && make install && \
+    cd .. && rm -rf sqlite-2.8.17* && \
+    ldconfig
+
+# Install Oracle Instant Client (Basic + SDK)
+RUN mkdir -p /opt/oracle && cd /opt/oracle && \
+    wget https://download.oracle.com/otn_software/linux/instantclient/2113000/instantclient-basic-linux.x64-21.13.0.0.0dbru.zip && \
+    wget https://download.oracle.com/otn_software/linux/instantclient/2113000/instantclient-sdk-linux.x64-21.13.0.0.0dbru.zip && \
+    unzip instantclient-basic-linux.x64-21.13.0.0.0dbru.zip && \
+    unzip instantclient-sdk-linux.x64-21.13.0.0.0dbru.zip && \
+    rm *.zip
+
+# Set OCI environment variables
+ENV LD_LIBRARY_PATH="/opt/oracle/instantclient_21_13"
+ENV ORACLE_HOME="/opt/oracle/instantclient_21_13"
+ENV PATH="$PATH:$ORACLE_HOME"
+
+WORKDIR /workspace
+COPY . .
+
+RUN chmod +x scripts/*.sh
+
+CMD ["./scripts/run_all_tests.sh"]

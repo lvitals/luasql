@@ -1,0 +1,8 @@
+src/*.so
+src/*.o
+src/jdbc/luasql.jar
+src/jdbc/bin/
+
+src/luasql/
+valgrind_logs/
+*.db

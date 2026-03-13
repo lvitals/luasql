@@ -1,0 +1,115 @@
+{
+   DuckDB_Init_Noise
+   Memcheck:Leak
+   match-leak-kinds: reachable,possible
+   obj:*/libduckdb.so*
+}
+{
+   Firebird_Init_Noise
+   Memcheck:Leak
+   match-leak-kinds: definite,reachable,possible
+   fun:malloc
+   obj:*/libfbclient.so*
+}
+{
+   Firebird_DLOpen_Noise
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:dl_open_worker
+}
+{
+   ODBC_System_Noise
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect,possible,reachable
+   obj:*/libodbc.so*
+}
+{
+   ODBC_Driver_Manager_Internal
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   fun:calloc
+   ...
+   obj:*/libodbc.so*
+}
+{
+   Oracle_OCI_Noise
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect,possible,reachable
+   obj:*/libclntsh.so*
+}
+{
+   Oracle_OCI_Core_Noise
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect,possible,reachable
+   obj:*/libclntshcore.so*
+}
+{
+   Oracle_OCI_Uninit_Noise
+   Memcheck:Param
+   match-leak-kinds: all
+   obj:*/libclntsh.so*
+}
+{
+   Oracle_OCI_Value_Noise
+   Memcheck:Value8
+   obj:*/libclntsh.so*
+}
+{
+   Oracle_OCI_Cond_Noise
+   Memcheck:Cond
+   obj:*/libclntsh.so*
+}
+{
+   Oracle_Env_Noise
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:slzsetevar
+}
+{
+   Oracle_Invalid_Read_Noise
+   Memcheck:Addr4
+   ...
+   obj:*/libclntsh.so*
+}
+{
+   Oracle_Invalid_Read_Noise_8
+   Memcheck:Addr8
+   ...
+   obj:*/libclntsh.so*
+}
+{
+   Oracle_NNZ_Noise
+   Memcheck:Leak
+   match-leak-kinds: all
+   obj:*/libnnz21.so*
+}
+{
+   Oracle_NNZ_Value_Noise
+   Memcheck:Value8
+   obj:*/libnnz21.so*
+}
+{
+   SQLite2_Internal_Write_Noise
+   Memcheck:Param
+   write(buf)
+   ...
+   obj:*/libsqlite.so*
+}
+{
+   SQLite2_Internal_Leak
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:calloc
+   ...
+   obj:*/libsqlite.so*
+}
+{
+   Lua_Init_Noise
+   Memcheck:Leak
+   match-leak-kinds: reachable,possible
+   obj:*/liblua.so*
+}
