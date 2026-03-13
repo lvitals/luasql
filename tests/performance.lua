@@ -59,13 +59,15 @@ local driver = arg[1]
 local datasource = arg[2] or "luasql-test"
 local username = arg[3] or nil
 local password = arg[4] or nil
+local host = arg[5] or nil
+local port = arg[6] or nil
 
 require (arg[1])
 assert (luasql, "no luasql table")
 
 local env, err = luasql[driver] ()
 assert (env, err)
-conn, err = env:connect (datasource, username, password)
+conn, err = env:connect (datasource, username, password, host, port)
 assert (conn, err)
 conn:execute ("drop table fetch_test")
 -- Create test table

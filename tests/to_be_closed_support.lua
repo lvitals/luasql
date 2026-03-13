@@ -14,7 +14,7 @@ end
 assert (tostring(t.cursor):match"cursor %(closed%)", "cursor already open")
 
 do
-	local connection <close> = CONN_OK (ENV:connect (datasource, username, password))
+	local connection <close> = CONN_OK (ENV:connect (datasource, username, password, host, port))
 	t.connection = connection
 	assert (tostring(t.connection):match"connection %(0x%w+%)", "connection was closed")
 end

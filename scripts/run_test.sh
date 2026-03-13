@@ -112,7 +112,6 @@ trap cleanup EXIT
 # 1. Apply necessary patches
 echo -e "\n${YELLOW}>>> Applying infrastructure patches...${NC}"
 ORDERED_PATCHES=(
-    "patches/tests_common_connection_args.patch"
 )
 
 # Driver-specific patches
