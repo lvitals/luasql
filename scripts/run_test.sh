@@ -70,15 +70,61 @@ wait_for_db() {
     return 1
 }
 
+APPLIED_PATCHES=()
+cleanup() {
+    local exit_code=$?
+    echo -e "\n${YELLOW}>>> Cleaning up...${NC}"
+    
+    # Ensure we are in the project root for relative paths to work
+    cd "$PROJECT_ROOT"
+
+    # Revert patches in reverse order
+    if [ ${#APPLIED_PATCHES[@]} -gt 0 ]; then
+        echo -e "${YELLOW}Reverting applied patches...${NC}"
+        for (( i=${#APPLIED_PATCHES[@]}-1; i>=0; i-- )); do
+            p=${APPLIED_PATCHES[$i]}
+            echo -n "Reverting $p... "
+            if patch -R -p0 < "$p" > /dev/null 2>&1; then
+                echo -e "${GREEN}OK${NC}"
+            else
+                echo -e "${RED}FAILED${NC}"
+            fi
+        done
+    fi
+
+    # Cleanup temp files
+    cd "$PROJECT_ROOT"
+    [ -f "tests/$DB_DS" ] && [[ "$DRIVER" == "sqlite"* || "$DRIVER" == "duckdb" ]] && rm -f "tests/$DB_DS"
+
+    echo -e "\n${BLUE}----------------------------------------------------------------${NC}"
+    if [ $exit_code -eq 0 ]; then
+        echo -e "${GREEN}${BOLD}RESULT: PASSED${NC}"
+    else
+        echo -e "${RED}${BOLD}RESULT: FAILED${NC}"
+    fi
+    echo -e "${BLUE}================================================================${NC}"
+    exit $exit_code
+}
+
+# Set trap for automatic cleanup on exit (including errors and signals)
+trap cleanup EXIT
+
 # 1. Apply necessary patches
 echo -e "\n${YELLOW}>>> Applying infrastructure patches...${NC}"
-APPLIED_PATCHES=()
 ORDERED_PATCHES=(
-    "patches/tests_connection_args.patch"
-    "patches/tests_duckdb_memory_fix.patch"
-    "patches/tests_odbc_postgres_fix.patch"
-    "patches/${DRIVER}_memory_fix.patch"
+    "patches/tests_common_connection_args.patch"
 )
+
+# Driver-specific patches
+case "$DRIVER" in
+    duckdb)   ORDERED_PATCHES+=("patches/tests_duckdb_memory_fix.patch") ;;
+    odbc)     ORDERED_PATCHES+=("patches/tests_odbc_postgres_fix.patch") ;;
+    firebird) ORDERED_PATCHES+=("patches/tests_firebird_connection_args.patch") ;;
+    *) ;;
+esac
+
+# Common memory fix patch for the driver itself
+ORDERED_PATCHES+=("patches/${DRIVER}_memory_fix.patch")
 
 for p in "${ORDERED_PATCHES[@]}"; do
     if [ -f "$p" ]; then
@@ -119,13 +165,18 @@ if [ "$RUNNING_IN_DOCKER" == "1" ]; then
         firebird) wait_for_db "$DB_HOST_FIREBIRD" 3050 || exit 1 ;;
         oci8)     
             wait_for_db "$DB_HOST_ORACLE" 1521 || exit 1
-            echo -n "Waiting for Oracle service FREEPDB1 to be ready... "
-            for i in {1..20}; do
-                if sqlplus -L system/luasql@${DB_HOST_ORACLE}/FREEPDB1 <<<'exit' >/dev/null 2>&1; then
+            echo -e "${YELLOW}Waiting for Oracle service FREEPDB1 to be ready (this can take up to 10 minutes)...${NC}"
+            for i in {1..60}; do
+                ERR_MSG=$(echo "exit" | sqlplus -L system/luasql@${DB_HOST_ORACLE}/FREEPDB1 2>&1)
+                if [ $? -eq 0 ]; then
                     echo -e "${GREEN}Ready!${NC}"
                     break
                 fi
-                [ $i -eq 20 ] && echo -e "${RED}Timeout!${NC}" && exit 1
+                [ $((i % 5)) -eq 0 ] && echo "Still waiting for FREEPDB1 ($((i * 10))s)... Last error: $(echo $ERR_MSG | head -n 1)"
+                if [ $i -eq 60 ]; then
+                    echo -e "${RED}Timeout!${NC}"
+                    exit 1
+                fi
                 sleep 10
             done
             export NLS_LANG="AMERICAN_AMERICA.AL32UTF8"
@@ -252,30 +303,5 @@ case "$MODE" in
         exit 1
         ;;
 esac
-
-# 7. Cleanup and Revert patches
-cd "$PROJECT_ROOT"
-[ -f "tests/$DB_DS" ] && [[ "$DRIVER" == "sqlite"* || "$DRIVER" == "duckdb" ]] && rm -f "tests/$DB_DS"
-
-if [ ${#APPLIED_PATCHES[@]} -gt 0 ]; then
-    echo -e "\n${YELLOW}>>> Reverting applied patches...${NC}"
-    for (( i=${#APPLIED_PATCHES[@]}-1; i>=0; i-- )); do
-        p=${APPLIED_PATCHES[$i]}
-        echo -n "Reverting $p... "
-        if patch -R -p0 < "$p" > /dev/null 2>&1; then
-            echo -e "${GREEN}OK${NC}"
-        else
-            echo -e "${RED}FAILED${NC}"
-        fi
-    done
-fi
-
-echo -e "\n${BLUE}----------------------------------------------------------------${NC}"
-if [ $RET -eq 0 ]; then
-    echo -e "${GREEN}${BOLD}RESULT: PASSED${NC}"
-else
-    echo -e "${RED}${BOLD}RESULT: FAILED${NC}"
-fi
-echo -e "${BLUE}================================================================${NC}"
 
 exit $RET

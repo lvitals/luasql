@@ -52,12 +52,14 @@ RUN apt-get update && apt-get install -y libtool tcl-dev && \
     cd .. && rm -rf sqlite-2.8.17* && \
     ldconfig
 
-# Install Oracle Instant Client (Basic + SDK)
+# Install Oracle Instant Client (Basic + SDK + SQL*Plus)
 RUN mkdir -p /opt/oracle && cd /opt/oracle && \
     wget https://download.oracle.com/otn_software/linux/instantclient/2113000/instantclient-basic-linux.x64-21.13.0.0.0dbru.zip && \
     wget https://download.oracle.com/otn_software/linux/instantclient/2113000/instantclient-sdk-linux.x64-21.13.0.0.0dbru.zip && \
+    wget https://download.oracle.com/otn_software/linux/instantclient/2113000/instantclient-sqlplus-linux.x64-21.13.0.0.0dbru.zip && \
     unzip instantclient-basic-linux.x64-21.13.0.0.0dbru.zip && \
     unzip instantclient-sdk-linux.x64-21.13.0.0.0dbru.zip && \
+    unzip instantclient-sqlplus-linux.x64-21.13.0.0.0dbru.zip && \
     rm *.zip
 
 # Set OCI environment variables
