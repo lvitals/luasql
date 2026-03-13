@@ -421,7 +421,7 @@ static int conn_setautocommit(lua_State *L) {
 /*
 ** Create a new Connection object and push it on top of the stack.
 */
-static int create_connection(lua_State *L, int env, duckdb_connection const con) {
+static int create_connection(lua_State *L, int env, duckdb_database db, duckdb_connection con) {
     conn_data *conn = (conn_data *)LUASQL_NEWUD(L, sizeof(conn_data));
     luasql_setmeta(L, LUASQL_CONNECTION_DUCKDB);
 
@@ -429,6 +429,7 @@ static int create_connection(lua_State *L, int env, duckdb_connection const con)
     conn->closed = 0;
     conn->env = LUA_NOREF;
     conn->auto_commit = 1;
+    conn->db = db;
     conn->con = con;
     lua_pushvalue(L, env);                       /* push env userdata */
     env_data *e = (env_data *)luaL_checkudata(L, -1, LUASQL_ENVIRONMENT_DUCKDB);
@@ -445,19 +446,21 @@ static int env_connect(lua_State *L) {
     duckdb_database db;
     duckdb_connection con;
 
-    char * error = NULL;
+    char *error = NULL;
 
     getenvironment(L);	/* validate environment */
 
     // Needs to pass in db config in third parameter here
     if (duckdb_open_ext(sourcename, &db, NULL, &error) != DuckDBSuccess) {
-        return luasql_failmsg(L, "error connecting to database. DuckDB: ", error);
+        int res = luasql_failmsg(L, "error connecting to database. DuckDB: ", error);
+        duckdb_free(error);
+        return res;
     }
     if (duckdb_connect(db, &con) != DuckDBSuccess) {
         duckdb_close(&db);
         return luasql_failmsg(L, "error connecting to database. DuckDB: ", "Unspecified driver error");
     }
-    return create_connection(L, 1, con);
+    return create_connection(L, 1, db, con);
 }
 
 /*
