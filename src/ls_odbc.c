@@ -633,6 +633,17 @@ static int stmt_paramtypes (lua_State *L)
 	return 1;
 }
 
+/*
+** Statement object collector function
+*/
+static int stmt_gc (lua_State *L) {
+	stmt_data *stmt = (stmt_data *) luaL_checkudata (L, 1, LUASQL_STATEMENT_ODBC);
+	if (stmt != NULL && !(stmt->closed)) {
+		stmt_shut(L, stmt);
+	}
+	return 0;
+}
+
 static int stmt_close(lua_State *L)
 {
 	stmt_data *stmt = (stmt_data *) luaL_checkudata (L, 1, LUASQL_STATEMENT_ODBC);
@@ -670,6 +681,23 @@ static int stmt_reset(lua_State *L)
 
 	lua_pushboolean(L, 1);
 	return 1;
+}
+
+/*
+** Connection object collector function
+*/
+static int conn_gc (lua_State *L) {
+	conn_data *conn = (conn_data *)luaL_checkudata(L, 1, LUASQL_CONNECTION_ODBC);
+	if (conn != NULL && !(conn->closed)) {
+		/* Decrement connection counter on environment object */
+		unlock_obj(L, conn->env);
+
+		/* Nullify structure fields. */
+		conn->closed = 1;
+		SQLDisconnect(conn->hdbc);
+		SQLFreeHandle(hDBC, conn->hdbc);
+	}
+	return 0;
 }
 
 /*
@@ -1227,8 +1255,8 @@ static void create_metatables (lua_State *L) {
 		{NULL, NULL},
 	};
 	struct luaL_Reg connection_methods[] = {
-		{"__gc", conn_close}, /* Should this method be changed? */
-		{"__close", conn_close},
+		{"__gc", conn_gc},
+		{"__close", conn_gc},
 		{"close", conn_close},
 		{"prepare", conn_prepare},
 		{"execute", conn_execute},
@@ -1238,8 +1266,8 @@ static void create_metatables (lua_State *L) {
 		{NULL, NULL},
 	};
 	struct luaL_Reg statement_methods[] = {
-		{"__gc", stmt_close}, /* Should this method be changed? */
-		{"__close", stmt_close},
+		{"__gc", stmt_gc},
+		{"__close", stmt_gc},
 		{"close", stmt_close},
 		{"execute", stmt_execute},
 		{"reset", stmt_reset},
@@ -1247,7 +1275,7 @@ static void create_metatables (lua_State *L) {
 		{NULL, NULL},
 	};
 	struct luaL_Reg cursor_methods[] = {
-		{"__gc", cur_gc}, /* Should this method be changed? */
+		{"__gc", cur_gc},
 		{"__close", cur_gc},
 		{"close", cur_close},
 		{"fetch", cur_fetch},
