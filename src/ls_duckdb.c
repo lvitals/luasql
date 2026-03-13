@@ -86,7 +86,9 @@ static void pushvalue(lua_State *L, duckdb_result *result, idx_t row, idx_t col)
     if (duckdb_value_is_null(result, col, row)) {
         lua_pushnil(L);
     } else {
-        lua_pushstring(L, duckdb_value_varchar(result, col, row));
+        char *str = duckdb_value_varchar(result, col, row);
+        lua_pushstring(L, str);
+        duckdb_free(str);
     }
 }
 
