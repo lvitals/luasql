@@ -267,12 +267,16 @@ static int create_cursor(lua_State *L, int conn, duckdb_result *result) {
 }
 
 static void sql_commit(conn_data *conn) {
-    duckdb_query(conn->con, "COMMIT", NULL);
+    duckdb_result res;
+    duckdb_query(conn->con, "COMMIT", &res);
+    duckdb_destroy_result(&res);
 }
 
 
 static void sql_begin(conn_data *conn) {
-    duckdb_query(conn->con, "BEGIN", NULL);
+    duckdb_result res;
+    duckdb_query(conn->con, "BEGIN", &res);
+    duckdb_destroy_result(&res);
 }
 
 
