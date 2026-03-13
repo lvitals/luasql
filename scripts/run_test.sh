@@ -117,7 +117,6 @@ ORDERED_PATCHES=(
 
 # Driver-specific patches
 case "$DRIVER" in
-    duckdb)   ORDERED_PATCHES+=("patches/tests_duckdb_memory_fix.patch") ;;
     firebird) ORDERED_PATCHES+=("patches/tests_firebird_connection_args.patch") ;;
     *) ;;
 esac
