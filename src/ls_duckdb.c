@@ -22,6 +22,7 @@ typedef struct {
     int auto_commit;        /* 0 for manual commit */
     duckdb_database db;
     duckdb_connection con;
+    char *pending_query;
 } conn_data;
 
 typedef struct {
@@ -362,6 +363,60 @@ static int conn_execute(lua_State *L) {
     }
 }
 
+static int conn_send_query(lua_State *L) {
+    conn_data *conn = getconnection(L);
+    const char *statement = luaL_checkstring(L, 2);
+    
+    if (conn->pending_query) {
+        free(conn->pending_query);
+    }
+    
+    conn->pending_query = strdup(statement);
+    if (!conn->pending_query) {
+        return luasql_failmsg(L, "error allocating memory for pending query", NULL);
+    }
+    
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int conn_poll(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int conn_get_result(lua_State *L) {
+    conn_data *conn = getconnection(L);
+    
+    if (!conn->pending_query) {
+        lua_pushnil(L);
+        return 1;
+    }
+    
+    duckdb_result result;
+    if (duckdb_query(conn->con, conn->pending_query, &result) != DuckDBSuccess) {
+        const char *err = duckdb_result_error(&result);
+        int res = luasql_failmsg(L, "error executing pending statement. DuckDB: ", err);
+        duckdb_destroy_result(&result);
+        free(conn->pending_query);
+        conn->pending_query = NULL;
+        return res;
+    }
+    
+    free(conn->pending_query);
+    conn->pending_query = NULL;
+
+    duckdb_result_type rt;
+    rt = duckdb_result_return_type(result);
+    if (rt == DUCKDB_RESULT_TYPE_QUERY_RESULT) {
+        return create_cursor(L, 1, &result);
+    } else {
+        lua_pushnumber(L, duckdb_rows_changed(&result));
+        duckdb_destroy_result(&result);
+        return 1;
+    }
+}
+
 
 /*
 ** Commit the current transaction.
@@ -431,6 +486,7 @@ static int create_connection(lua_State *L, int env, duckdb_database db, duckdb_c
     conn->auto_commit = 1;
     conn->db = db;
     conn->con = con;
+    conn->pending_query = NULL;
     lua_pushvalue(L, env);                       /* push env userdata */
     env_data *e = (env_data *)luaL_checkudata(L, -1, LUASQL_ENVIRONMENT_DUCKDB);
     e->open_conns += 1;
@@ -515,6 +571,9 @@ static void create_metatables(lua_State *L) {
         {"__close", conn_close},
         {"close", conn_close},
         {"execute", conn_execute},
+        {"send_query", conn_send_query},
+        {"poll", conn_poll},
+        {"get_result", conn_get_result},
         {"commit", conn_commit},
         {"rollback", conn_rollback},
         {"setautocommit", conn_setautocommit},
