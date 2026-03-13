@@ -384,7 +384,6 @@ static int conn_commit(lua_State *L)
 */
 static int conn_rollback(lua_State *L)
 {
-  char *errmsg;
   conn_data *conn = getconnection(L);
   duckdb_result res;
   const char *sql = "ROLLBACK";
@@ -393,12 +392,12 @@ static int conn_rollback(lua_State *L)
 
   if (duckdb_query(conn->con, sql, &res) != DuckDBSuccess)
     {
-      lua_pushnil(L);
-      lua_pushliteral(L, LUASQL_PREFIX);
-      lua_pushstring(L, errmsg);
-      lua_concat(L, 2);
-      return 2;
+      const char *err = duckdb_result_error(&res);
+      int ret = luasql_failmsg(L, "error rolling back transaction. DuckDB: ", err);
+      duckdb_destroy_result(&res);
+      return ret;
     }
+  duckdb_destroy_result(&res);
   lua_pushboolean(L, 1);
   return 1;
 }
