@@ -23,7 +23,7 @@ function drop_table ()
 	-- separate. So we need a new transaction i.e. connection
 	-- to work in
 	assert(CONN:close ())
-	CONN = assert(ENV:connect (datasource, username, password))
+	CONN = assert(ENV:connect (datasource, username, password, host, port))
 	orig_drop_table()
 	CONN:commit()
 end
