@@ -34,6 +34,12 @@
    obj:*/libodbc.so*
 }
 {
+   ODBC_Postgres_Driver_Noise
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect,possible,reachable
+   obj:*/psqlodbcw.so*
+}
+{
    Oracle_OCI_Noise
    Memcheck:Leak
    match-leak-kinds: definite,indirect,possible,reachable
@@ -112,4 +118,12 @@
    Memcheck:Leak
    match-leak-kinds: reachable,possible
    obj:*/liblua.so*
+}
+{
+   Generic_DLOpen_Noise
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   fun:calloc
+   ...
+   fun:dl_open_worker
 }
