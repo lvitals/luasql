@@ -219,7 +219,7 @@ static int fail(lua_State *L,  const SQLSMALLINT type, const SQLHANDLE handle) {
 static param_data *malloc_stmt_params(SQLSMALLINT c)
 {
 	param_data *p = (param_data *)malloc(sizeof(param_data)*c);
-	memset(p, 0, sizeof(param_data)*c);
+	if (p) memset(p, 0, sizeof(param_data)*c);
 
 	return p;
 }
@@ -230,7 +230,10 @@ static param_data *free_stmt_params(param_data *data, SQLSMALLINT c)
 		param_data *p = data;
 
 		for(; c>0; ++p, --c) {
-			free(p->buf);
+			if (p->buf) {
+				free(p->buf);
+				p->buf = NULL;
+			}
 		}
 		free(data);
 	}
@@ -372,7 +375,7 @@ static int push_column(lua_State *L, int coltypes, const SQLHSTMT hstmt,
 #if LUA_VERSION_NUM>=503
 		/* iNteger */
 		case 'n': {
-			SQLLEN num;
+			SQLINTEGER num;
 			SQLLEN got;
 			SQLRETURN rc = SQLGetData(hstmt, i, SQL_C_SLONG, &num, 0, &got);
 			if (error(rc))
@@ -380,7 +383,7 @@ static int push_column(lua_State *L, int coltypes, const SQLHSTMT hstmt,
 			if (got == SQL_NULL_DATA)
 				lua_pushnil(L);
 			else
-				lua_pushinteger(L, num);
+				lua_pushinteger(L, (lua_Integer)num);
 			return 0;
 		}
 #endif
@@ -403,40 +406,40 @@ static int push_column(lua_State *L, int coltypes, const SQLHSTMT hstmt,
         case 'i': {
 			SQLSMALLINT stype = (type == 't') ? SQL_C_CHAR : SQL_C_BINARY;
 			SQLLEN got;
-			char *buffer;
-			luaL_Buffer b;
+			char buffer[LUAL_BUFFERSIZE];
 			SQLRETURN rc;
-			luaL_buffinit(L, &b);
-			buffer = luaL_prepbuffer(&b);
+
 			rc = SQLGetData(hstmt, i, stype, buffer, LUAL_BUFFERSIZE, &got);
 			if (got == SQL_NULL_DATA) {
 				lua_pushnil(L);
 				return 0;
 			}
-			/* concat intermediary chunks */
-			while (rc == SQL_SUCCESS_WITH_INFO) {
-				if (got >= LUAL_BUFFERSIZE || got == SQL_NO_TOTAL) {
-					got = LUAL_BUFFERSIZE;
-					/* get rid of null termination in string block */
-					if (stype == SQL_C_CHAR) got--;
-				}
-				luaL_addsize(&b, got);
-				buffer = luaL_prepbuffer(&b);
-				rc = SQLGetData(hstmt, i, stype, buffer,
-					LUAL_BUFFERSIZE, &got);
-			}
-			/* concat last chunk */
+
 			if (rc == SQL_SUCCESS) {
-				if (got >= LUAL_BUFFERSIZE || got == SQL_NO_TOTAL) {
-					got = LUAL_BUFFERSIZE;
-					/* get rid of null termination in string block */
-					if (stype == SQL_C_CHAR) got--;
+				lua_pushlstring(L, buffer, got);
+				return 0;
+			}
+
+			if (rc == SQL_SUCCESS_WITH_INFO) {
+				luaL_Buffer b;
+				luaL_buffinit(L, &b);
+				luaL_addlstring(&b, buffer, (stype == SQL_C_CHAR) ? LUAL_BUFFERSIZE-1 : LUAL_BUFFERSIZE);
+				while (rc == SQL_SUCCESS_WITH_INFO) {
+					char *buff = luaL_prepbuffer(&b);
+					rc = SQLGetData(hstmt, i, stype, buff, LUAL_BUFFERSIZE, &got);
+					if (rc == SQL_ERROR) return fail(L, hSTMT, hstmt);
+					if (got == SQL_NULL_DATA) break; /* should not happen */
+					if (rc == SQL_SUCCESS_WITH_INFO) {
+						luaL_addsize(&b, (stype == SQL_C_CHAR) ? LUAL_BUFFERSIZE-1 : LUAL_BUFFERSIZE);
+					} else {
+						luaL_addsize(&b, got);
+					}
 				}
-				luaL_addsize(&b, got);
+				luaL_pushresult(&b);
+				return 0;
 			}
 			if (rc == SQL_ERROR) return fail(L, hSTMT, hstmt);
-			/* return everything we got */
-			luaL_pushresult(&b);
+			lua_pushnil(L);
 			return 0;
 		}
     }
@@ -729,10 +732,10 @@ static int raw_execute(lua_State *L, int istmt)
 
 	if (numcols > 0) {
 		/* if there is a results table (e.g., SELECT) */
-		return create_cursor(L, -1, stmt, numcols);
+		return create_cursor(L, istmt, stmt, numcols);
 	} else {
 		/* if action has no results (e.g., UPDATE) */
-		SQLLEN numrows;
+		SQLLEN numrows = -1;
 		if(error(SQLRowCount(stmt->hstmt, &numrows))) {
 			return fail(L, hSTMT, stmt->hstmt);
 		}
