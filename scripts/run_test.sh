@@ -109,31 +109,6 @@ cleanup() {
 # Set trap for automatic cleanup on exit (including errors and signals)
 trap cleanup EXIT
 
-# 1. Apply necessary patches
-echo -e "\n${YELLOW}>>> Applying infrastructure patches...${NC}"
-ORDERED_PATCHES=(
-)
-
-# Driver-specific patches
-case "$DRIVER" in
-    *) ;;
-esac
-
-# Common memory fix patch for the driver itself
-ORDERED_PATCHES+=("patches/${DRIVER}_memory_fix.patch")
-
-for p in "${ORDERED_PATCHES[@]}"; do
-    if [ -f "$p" ]; then
-        echo -n "Applying $p... "
-        if patch -p0 --ignore-whitespace < "$p" > /dev/null 2>&1; then
-            echo -e "${GREEN}OK${NC}"
-            APPLIED_PATCHES+=("$p")
-        else
-            echo -e "${YELLOW}SKIPPED (already applied or not applicable)${NC}"
-        fi
-    fi
-done
-
 # 2. Determine connection arguments based on driver
 DB_DS="$DB_NAME"
 DB_UN="$DB_USER"
@@ -252,9 +227,9 @@ if ! make "$DRIVER" OPTFLAGS="$COMPILE_FLAGS" > /tmp/build_single.log 2>&1; then
 fi
 echo -e "${GREEN}Build successful.${NC}"
 
-# Setup symlink for Lua require
+# Move built driver to its correct subfolder
 mkdir -p src/luasql
-ln -sf "../$DRIVER.so" "src/luasql/$DRIVER.so"
+mv "src/$DRIVER.so" "src/luasql/$DRIVER.so"
 
 # Execution
 cd tests
@@ -269,7 +244,7 @@ case "$MODE" in
 
     valgrind)
         echo -e "${YELLOW}Running Valgrind leak detection...${NC}"
-        V_FLAGS="--leak-check=full --show-leak-kinds=definite --errors-for-leak-kinds=definite --track-origins=yes --suppressions=$PROJECT_ROOT/patches/valgrind.supp"
+        V_FLAGS="--leak-check=full --show-leak-kinds=definite --errors-for-leak-kinds=definite --track-origins=yes --suppressions=$PROJECT_ROOT/scripts/valgrind.supp"
         [ "$DRIVER" == "duckdb" ] && V_FLAGS="$V_FLAGS --max-stackframe=16777216"
         valgrind $V_FLAGS lua test.lua "$DRIVER" "$DB_DS" "$DB_UN" "$DB_PW" "$DB_HO" "$DB_PO"
         RET=$?

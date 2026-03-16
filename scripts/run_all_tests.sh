@@ -41,34 +41,6 @@ if [ "$RUNNING_IN_DOCKER" == "1" ]; then
     export MYSQL_PWD=$DB_PASS
 fi
 
-# 1. Apply all patches once
-echo -e "\n${YELLOW}>>> Applying memory and infrastructure patches...${NC}"
-APPLIED_PATCHES=()
-if [ -d "patches" ]; then
-    ORDERED_PATCHES=(
-        "patches/tests_connection_args.patch"
-        "patches/tests_duckdb_memory_fix.patch"
-        "patches/duckdb_memory_fix.patch"
-        "patches/firebird_memory_fix.patch"
-        "patches/odbc_memory_fix.patch"
-        "patches/oci8_memory_fix.patch"
-    )
-    
-    for p in "${ORDERED_PATCHES[@]}"; do
-        if [ -f "$p" ]; then
-            echo -n "Applying $p... "
-            if patch -p0 < "$p" > /dev/null; then
-                echo -e "${GREEN}OK${NC}"
-                APPLIED_PATCHES+=("$p")
-            else
-                echo -e "${RED}FAILED (might be already applied)${NC}"
-            fi
-        fi
-    done
-fi
-
-export SKIP_PATCHING=1
-
 # 2. Setup Driver environment for Makefile
 export LUA_INC="/usr/include/lua5.4"
 # Variables used by Makefile: DRIVER_INCS_<driver> and DRIVER_LIBS_<driver>
