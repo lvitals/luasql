@@ -57,6 +57,8 @@ typedef struct {
 	int           lock;               /* lock count for open statements */
 	env_data      *env;               /* the connection's environment */
 	SQLHDBC       hdbc;               /* database connection handle */
+	SQLHSTMT      hstmt_async;        /* handle for async statement */
+	short         async_active;       /* is an async operation active? */
 } conn_data;
 
 typedef struct {
@@ -694,6 +696,10 @@ static int conn_gc (lua_State *L) {
 
 		/* Nullify structure fields. */
 		conn->closed = 1;
+		if (conn->hstmt_async != SQL_NULL_HANDLE) {
+			SQLFreeHandle(hSTMT, conn->hstmt_async);
+			conn->hstmt_async = SQL_NULL_HANDLE;
+		}
 		SQLDisconnect(conn->hdbc);
 		SQLFreeHandle(hDBC, conn->hdbc);
 	}
@@ -724,6 +730,10 @@ static int conn_close (lua_State *L)
 
 	/* Nullify structure fields. */
 	conn->closed = 1;
+	if (conn->hstmt_async != SQL_NULL_HANDLE) {
+		SQLFreeHandle(hSTMT, conn->hstmt_async);
+		conn->hstmt_async = SQL_NULL_HANDLE;
+	}
 	SQLDisconnect(conn->hdbc);
 	ret = SQLFreeHandle(hDBC, conn->hdbc);
 	if (error(ret)) {
@@ -1066,6 +1076,127 @@ static int conn_execute (lua_State *L)
 }
 
 /*
+** Executes the given statement asynchronously
+*/
+static int conn_send_query(lua_State *L) {
+	conn_data *conn = getconnection(L, 1);
+	const char *statement = luaL_checkstring(L, 2);
+	SQLRETURN ret;
+
+	if (conn->hstmt_async == SQL_NULL_HANDLE) {
+		ret = SQLAllocHandle(hSTMT, conn->hdbc, &conn->hstmt_async);
+		if (error(ret)) return fail(L, hDBC, conn->hdbc);
+	}
+
+	/* ensure it's not busy */
+	if (conn->async_active) {
+		return luasql_faildirect(L, "an async query is already in progress");
+	}
+
+	/* We must use SQLPrepare + SQLExecute for polling support without re-sending string */
+	ret = SQLPrepare(conn->hstmt_async, (SQLCHAR *)statement, SQL_NTS);
+	if (error(ret)) return fail(L, hSTMT, conn->hstmt_async);
+
+	/* Try to enable async. */
+	SQLSetStmtAttr(conn->hstmt_async, SQL_ATTR_ASYNC_ENABLE, (SQLPOINTER)SQL_ASYNC_ENABLE_ON, 0);
+
+	ret = SQLExecute(conn->hstmt_async);
+
+	if (ret == SQL_STILL_EXECUTING) {
+		conn->async_active = 1;
+		lua_pushinteger(L, 1); /* status: still executing */
+		lua_pushinteger(L, 0);
+		return 2;
+	}
+
+	if (error(ret)) return fail(L, hSTMT, conn->hstmt_async);
+
+	/* Finished immediately */
+	conn->async_active = 1;
+	lua_pushinteger(L, 0); /* status: done */
+	lua_pushinteger(L, 0);
+	return 2;
+}
+
+/*
+** Polls the async execution
+*/
+static int conn_poll(lua_State *L) {
+	conn_data *conn = getconnection(L, 1);
+	SQLRETURN ret;
+
+	if (!conn->async_active || conn->hstmt_async == SQL_NULL_HANDLE) {
+		lua_pushboolean(L, 0);
+		lua_pushinteger(L, 0);
+		return 2;
+	}
+
+	ret = SQLExecute(conn->hstmt_async);
+
+	if (ret == SQL_STILL_EXECUTING) {
+		lua_pushboolean(L, 1); /* busy */
+		lua_pushinteger(L, 1); /* status */
+		return 2;
+	}
+
+	lua_pushboolean(L, 0); /* done */
+	lua_pushinteger(L, 0);
+	return 2;
+}
+
+/*
+** Retrieves the result of an async execution
+*/
+static int conn_get_result(lua_State *L) {
+	conn_data *conn = getconnection(L, 1);
+	SQLSMALLINT numcols;
+	SQLRETURN ret;
+
+	if (!conn->async_active || conn->hstmt_async == SQL_NULL_HANDLE) {
+		return luasql_faildirect(L, "no async query in progress");
+	}
+
+	/* determine the number of result columns */
+	ret = SQLNumResultCols(conn->hstmt_async, &numcols);
+	if (error(ret)) {
+		conn->async_active = 0;
+		return fail(L, hSTMT, conn->hstmt_async);
+	}
+
+	if (numcols > 0) {
+		/* SELECT query, create a statement object and then a cursor */
+		stmt_data *stmt = (stmt_data *)LUASQL_NEWUD(L, sizeof(stmt_data));
+		memset(stmt, 0, sizeof(stmt_data));
+		stmt->closed = 0;
+		stmt->conn = conn;
+		stmt->hstmt = conn->hstmt_async;
+		stmt->hidden = 1;
+		luasql_setmeta(L, LUASQL_STATEMENT_ODBC);
+
+		/* hstmt_async is now owned by stmt object */
+		conn->hstmt_async = SQL_NULL_HANDLE;
+		conn->async_active = 0;
+
+		lock_obj(L, 1, conn); /* lock connection for this statement */
+
+		return create_cursor(L, lua_gettop(L), stmt, numcols);
+	} else {
+		/* UPDATE/INSERT query */
+		SQLLEN numrows = -1;
+		SQLRowCount(conn->hstmt_async, &numrows);
+
+		conn->async_active = 0;
+
+#if LUA_VERSION_NUM >= 503
+		lua_pushinteger(L, (lua_Integer)numrows);
+#else
+		lua_pushnumber(L, (lua_Number)numrows);
+#endif
+		return 1;
+	}
+}
+
+/*
 ** Rolls back a transaction.
 */
 static int conn_commit (lua_State *L) {
@@ -1130,6 +1261,8 @@ static int create_connection (lua_State *L, int o, env_data *env, SQLHDBC hdbc)
 	conn->lock = 0;
 	conn->env = env;
 	conn->hdbc = hdbc;
+	conn->hstmt_async = SQL_NULL_HANDLE;
+	conn->async_active = 0;
 
 	lock_obj(L, 1, env);
 
@@ -1260,6 +1393,9 @@ static void create_metatables (lua_State *L) {
 		{"close", conn_close},
 		{"prepare", conn_prepare},
 		{"execute", conn_execute},
+		{"send_query", conn_send_query},
+		{"poll", conn_poll},
+		{"get_result", conn_get_result},
 		{"commit", conn_commit},
 		{"rollback", conn_rollback},
 		{"setautocommit", conn_setautocommit},
