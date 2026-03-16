@@ -36,6 +36,11 @@ Batch ASAN analysis script.
 - **Purpose**: Runs AddressSanitizer analysis on multiple drivers and generates a summary report.
 - **Usage**: `./scripts/check_asan.sh [driver]`
 
+### 5. run_async_test.sh
+Performance benchmarking script for asynchronous/non-blocking driver operations.
+- **Purpose**: Compiles the specified driver with optimization flags and runs the async performance test suite.
+- **Usage**: `./scripts/run_async_test.sh <driver>`
+
 ---
 
 ## Practical Command Examples
@@ -60,6 +65,11 @@ podman-compose run --rm test-runner ./scripts/run_test.sh sqlite3 valgrind
 ### Run ASAN on a specific driver
 ```bash
 podman-compose run --rm test-runner ./scripts/run_test.sh duckdb asan
+```
+
+### Run Async Performance Benchmark
+```bash
+podman-compose run --rm test-runner ./scripts/run_async_test.sh sqlite3
 ```
 
 ---
