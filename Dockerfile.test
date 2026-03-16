@@ -1,5 +1,9 @@
 FROM debian:bookworm-slim
 
+# Build arguments
+ARG FIREBIRD_VERSION=3.0
+ENV FIREBIRD_VERSION=${FIREBIRD_VERSION}
+
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \

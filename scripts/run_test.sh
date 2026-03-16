@@ -147,7 +147,13 @@ case "$DRIVER" in
     sqlite)   DB_DS="test_single_$MODE.db" ;;
     postgres) DB_HO="$DB_HOST_POSTGRES" ;;
     mysql)    DB_HO="$DB_HOST_MYSQL" ;;
-    firebird) DB_DS="$DB_HOST_FIREBIRD:luasql_test.fdb" ;;
+    firebird)
+        if [[ "$FIREBIRD_VERSION" == "v5"* || "$FIREBIRD_VERSION" == "5.0"* ]]; then
+            DB_DS="$DB_HOST_FIREBIRD:/firebird/data/luasql_test.fdb"
+        else
+            DB_DS="$DB_HOST_FIREBIRD:luasql_test.fdb"
+        fi
+        ;;
     oci8)     DB_DS="//${DB_HOST_ORACLE:-db-oracle}:1521/FREEPDB1" ;;
     *) ;;
 esac

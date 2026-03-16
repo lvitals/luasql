@@ -74,6 +74,27 @@ podman-compose run --rm test-runner ./scripts/run_async_test.sh sqlite3
 
 ---
 
+## Testing Multiple Firebird Versions
+
+The suite supports testing against Firebird 3.0, 4.0, and 5.0. You can switch the version using the `FIREBIRD_VERSION` environment variable. This will automatically pull the corresponding database image and adjust build parameters.
+
+### Example: Run full suite against Firebird 4.0
+```bash
+FIREBIRD_VERSION=4.0 podman-compose up --build test-runner
+```
+
+### Example: Run functional tests for Firebird 5.0 (jacobalberty image)
+```bash
+FIREBIRD_VERSION=v5 podman-compose run --rm test-runner ./scripts/run_test.sh firebird
+```
+
+### Example: Run functional tests for Firebird 5.0 (official image)
+```bash
+FIREBIRD_IMAGE=docker.io/firebirdsql/firebird FIREBIRD_VERSION=5.0 podman-compose run --rm test-runner ./scripts/run_test.sh firebird
+```
+
+---
+
 ## Environment Configuration
 
 The scripts automatically utilize the following environment variables defined in `compose.yml`:
@@ -83,3 +104,5 @@ The scripts automatically utilize the following environment variables defined in
 - `DB_HOST_POSTGRES`: PostgreSQL container hostname.
 - `DB_HOST_MYSQL`: MySQL/MariaDB container hostname.
 - `DB_HOST_FIREBIRD`: Firebird container hostname.
+- `FIREBIRD_VERSION`: The Firebird version to test. Note: use `v5` for `jacobalberty/firebird` or `5.0` for `firebirdsql/firebird`.
+- `FIREBIRD_IMAGE`: Docker image for Firebird. Use `docker.io/jacobalberty/firebird` (default) or `docker.io/firebirdsql/firebird`.
