@@ -40,6 +40,11 @@ typedef struct {
 	int           env;                /* reference to environment */
 	OCISvcCtx    *svchp;              /* service handle */
 	OCIError     *errhp; /* !!! */
+	/* Async support fields */
+	int           pending_type;  /* 0: none, 1: cursor, 2: count */
+	ub4           pending_rows;
+	OCIStmt      *pending_stmt;
+	char         *pending_text;
 } conn_data;
 
 
@@ -667,45 +672,6 @@ static int cur_numrows (lua_State *L) {
 
 
 /*
-** Close a Connection object.
-*/
-static int conn_close (lua_State *L) {
-	env_data *env;
-	conn_data *conn = (conn_data *)luaL_checkudata (L, 1, LUASQL_CONNECTION_OCI8);
-	luaL_argcheck (L, conn != NULL, 1, LUASQL_PREFIX"connection expected");
-	if (conn->closed) {
-		lua_pushboolean (L, 0);
-		lua_pushstring (L, "Connection is already closed");
-		return 2;
-	}
-	if (conn->cur_counter > 0){
-		lua_pushboolean (L, 0);
-		lua_pushstring (L, "There are open cursors");
-		return 2;
-	}
-
-	/* Nullify structure fields. */
-	conn->closed = 1;
-	if (conn->svchp) {
-		if (conn->loggedon)
-			OCILogoff (conn->svchp, conn->errhp);
-		else
-			OCIHandleFree ((dvoid *)conn->svchp, OCI_HTYPE_SVCCTX);
-	}
-	if (conn->errhp)
-		OCIHandleFree ((dvoid *)conn->errhp, OCI_HTYPE_ERROR);
-	/* Decrement connection counter on environment object */
-	lua_rawgeti (L, LUA_REGISTRYINDEX, conn->env);
-	env = lua_touserdata (L, -1);
-	env->conn_counter--;
-	luaL_unref (L, LUA_REGISTRYINDEX, conn->env);
-
-	lua_pushboolean (L, 1);
-	return 1;
-}
-
-
-/*
 ** Create a new Cursor object and push it on top of the stack.
 */
 static int create_cursor (lua_State *L, int o, conn_data *conn, OCIStmt *stmt, const char *text) {
@@ -754,11 +720,10 @@ static int create_cursor (lua_State *L, int o, conn_data *conn, OCIStmt *stmt, c
 
 
 /*
-** Execute an SQL statement.
-** Return a Cursor object if the statement is a query, otherwise
-** return the number of tuples affected by the statement.
+** Executes an SQL statement but stores the result in the connection
+** object for later retrieval. (Synchronous fallback)
 */
-static int conn_execute (lua_State *L) {
+static int conn_send_query (lua_State *L) {
 	env_data *env;
 	conn_data *conn = getconnection (L);
 	const char *statement = luaL_checkstring (L, 2);
@@ -769,11 +734,25 @@ static int conn_execute (lua_State *L) {
 	ub2 type;
 	OCIStmt *stmthp;
 
+	if (conn->pending_type == 1)
+		return luaL_error (L, LUASQL_PREFIX"there is already a pending query");
+	
+	/* If there's a pending count, free the handle before starting a new one */
+	if (conn->pending_type == 2) {
+		if (conn->pending_stmt)
+			OCIHandleFree ((dvoid *)conn->pending_stmt, OCI_HTYPE_STMT);
+		if (conn->pending_text)
+			free (conn->pending_text);
+		conn->pending_type = 0;
+	}
+
 	/* get environment */
 	lua_rawgeti (L, LUA_REGISTRYINDEX, conn->env);
 	if (!lua_isuserdata (L, -1))
 		luaL_error(L,LUASQL_PREFIX"invalid environment in connection!");
 	env = (env_data *)lua_touserdata (L, -1);
+	lua_pop (L, 1);
+
 	/* statement handle */
 	ASSERT (L, OCIHandleAlloc ((dvoid *)env->envhp, (dvoid **)&stmthp,
 		OCI_HTYPE_STMT, (size_t)0, (dvoid **)0), conn->errhp);
@@ -802,19 +781,128 @@ static int conn_execute (lua_State *L) {
 		OCIHandleFree ((dvoid *)stmthp, OCI_HTYPE_STMT);
 		return checkerr (L, status, conn->errhp);
 	}
+
+	conn->pending_stmt = stmthp;
+	conn->pending_text = strdup (statement);
 	if (type == OCI_STMT_SELECT) {
-		/* create cursor */
-		return create_cursor (L, 1, conn, stmthp, statement);
+		conn->pending_type = 1; /* cursor */
 	} else {
-		/* return number of rows */
-		int rows_affected;
+		ub4 rows_affected;
 		ASSERT (L, OCIAttrGet ((dvoid *)stmthp, (ub4)OCI_HTYPE_STMT,
 			(dvoid *)&rows_affected, (ub4 *)0,
 			(ub4)OCI_ATTR_ROW_COUNT, conn->errhp), conn->errhp);
-		OCIHandleFree ((dvoid *)stmthp, OCI_HTYPE_STMT);
-		lua_pushnumber (L, rows_affected);
+		conn->pending_type = 2; /* count */
+		conn->pending_rows = rows_affected;
+	}
+
+	lua_pushinteger (L, 0); /* status: finished */
+	lua_pushinteger (L, 0); /* ret: success */
+	return 2;
+}
+
+
+/*
+** Get the result of a pending query. (Synchronous fallback)
+*/
+static int conn_get_result (lua_State *L) {
+	conn_data *conn = getconnection (L);
+	if (conn->pending_type == 0) {
+		lua_pushnil (L);
 		return 1;
 	}
+	if (conn->pending_type == 1) {
+		/* cursor */
+		int res = create_cursor (L, 1, conn, conn->pending_stmt, conn->pending_text);
+		conn->pending_type = 0;
+		conn->pending_stmt = NULL;
+		free (conn->pending_text);
+		conn->pending_text = NULL;
+		return res;
+	} else {
+		/* count */
+		lua_pushnumber (L, conn->pending_rows);
+		OCIHandleFree ((dvoid *)conn->pending_stmt, OCI_HTYPE_STMT);
+		conn->pending_type = 0;
+		conn->pending_stmt = NULL;
+		free (conn->pending_text);
+		conn->pending_text = NULL;
+		return 1;
+	}
+}
+
+
+/*
+** Poll the status of a pending query. (Synchronous fallback)
+*/
+static int conn_poll (lua_State *L) {
+	lua_pushboolean (L, 0);
+	lua_pushinteger (L, 0);
+	return 2;
+}
+
+
+/*
+** Execute an SQL statement.
+** Return a Cursor object if the statement is a query, otherwise
+** return the number of tuples affected by the statement.
+*/
+static int conn_execute (lua_State *L) {
+	int res = conn_send_query (L);
+	if (res != 2 || !lua_isinteger(L, -2) || lua_tointeger(L, -2) != 0)
+		return res;
+	lua_pop (L, 2); /* pop 0, 0 */
+	return conn_get_result (L);
+}
+
+
+/*
+** Close a Connection object.
+*/
+static int conn_close (lua_State *L) {
+	env_data *env;
+	conn_data *conn = (conn_data *)luaL_checkudata (L, 1, LUASQL_CONNECTION_OCI8);
+	luaL_argcheck (L, conn != NULL, 1, LUASQL_PREFIX"connection expected");
+	if (conn->closed) {
+		lua_pushboolean (L, 0);
+		lua_pushstring (L, "Connection is already closed");
+		return 2;
+	}
+	if (conn->cur_counter > 0){
+		lua_pushboolean (L, 0);
+		lua_pushstring (L, "There are open cursors");
+		return 2;
+	}
+
+	/* Nullify structure fields. */
+	conn->closed = 1;
+
+	/* Cleanup pending queries */
+	if (conn->pending_stmt) {
+		OCIHandleFree ((dvoid *)conn->pending_stmt, OCI_HTYPE_STMT);
+		conn->pending_stmt = NULL;
+	}
+	if (conn->pending_text) {
+		free (conn->pending_text);
+		conn->pending_text = NULL;
+	}
+	conn->pending_type = 0;
+
+	if (conn->svchp) {
+		if (conn->loggedon)
+			OCILogoff (conn->svchp, conn->errhp);
+		else
+			OCIHandleFree ((dvoid *)conn->svchp, OCI_HTYPE_SVCCTX);
+	}
+	if (conn->errhp)
+		OCIHandleFree ((dvoid *)conn->errhp, OCI_HTYPE_ERROR);
+	/* Decrement connection counter on environment object */
+	lua_rawgeti (L, LUA_REGISTRYINDEX, conn->env);
+	env = lua_touserdata (L, -1);
+	env->conn_counter--;
+	luaL_unref (L, LUA_REGISTRYINDEX, conn->env);
+
+	lua_pushboolean (L, 1);
+	return 1;
 }
 
 
@@ -896,6 +984,9 @@ static int env_connect (lua_State *L) {
 	conn->loggedon = 0;
 	conn->svchp = NULL;
 	conn->errhp = NULL;
+	conn->pending_type = 0;
+	conn->pending_stmt = NULL;
+	conn->pending_text = NULL;
 	lua_pushvalue (L, 1);
 	conn->env = luaL_ref (L, LUA_REGISTRYINDEX);
 
@@ -995,6 +1086,9 @@ static void create_metatables (lua_State *L) {
 		{"commit", conn_commit},
 		{"rollback", conn_rollback},
 		{"setautocommit", conn_setautocommit},
+		{"send_query", conn_send_query},
+		{"get_result", conn_get_result},
+		{"poll", conn_poll},
 		{NULL, NULL},
 	};
 	struct luaL_Reg cursor_methods[] = {

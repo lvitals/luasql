@@ -100,7 +100,24 @@ if [ "$RUNNING_IN_DOCKER" == "1" ]; then
         postgres) wait_for_db "$DB_HOST_POSTGRES" 5432 || exit 1 ;;
         mysql)    wait_for_db "$DB_HOST_MYSQL" 3306 || exit 1 ;;
         firebird) wait_for_db "$DB_HOST_FIREBIRD" 3050 || exit 1 ;;
-        oci8)     wait_for_db "$DB_HOST_ORACLE" 1521 || exit 1 ;;
+        oci8)
+            wait_for_db "$DB_HOST_ORACLE" 1521 || exit 1
+            echo -e "${YELLOW}Waiting for Oracle service FREEPDB1 to be ready (this can take up to 10 minutes)...${NC}"
+            for i in {1..60}; do
+                # Try to connect using sqlplus to verify service availability
+                if echo "exit" | sqlplus -L system/luasql@${DB_HOST_ORACLE}/FREEPDB1 > /dev/null 2>&1; then
+                    echo -e "${GREEN}Ready!${NC}"
+                    break
+                fi
+                [ $((i % 5)) -eq 0 ] && echo "Still waiting for FREEPDB1 ($((i * 10))s)..."
+                if [ $i -eq 60 ]; then
+                    echo -e "${RED}Timeout!${NC}"
+                    exit 1
+                fi
+                sleep 10
+            done
+            export NLS_LANG="AMERICAN_AMERICA.AL32UTF8"
+            ;;
         *) ;;
     esac
 fi
